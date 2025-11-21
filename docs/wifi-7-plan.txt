@@ -1,0 +1,441 @@
+ Post-Reboot WiFi 7 Recovery Plan
+
+ Current Situation
+
+ - WiFi 7 WCN7850 functional but TX power limited to 1 dBm (should be 24 dBm)
+ - Root cause: board-id 0xff generic calibration (BIOS lacks ACPI BDF data)
+ - Driver unstable after multiple reloads - needs clean reboot
+ - Original firmware restored, custom attempts backed up
+
+ Primary Plan: Verify & Document Baseline
+
+ Step 1: Post-Reboot Verification
+ - Reboot system for clean driver state
+ - Check iw dev confirms interface exists
+ - Test TX power: sudo iw dev wlan0 set txpower fixed 2400
+ - Scan for neighbor networks to confirm limitation persists
+ - Document baseline: range, detected APs, signal strength
+
+ Step 2: BIOS Investigation
+ - Check BIOS version: sudo dmidecode -t bios
+ - Visit Gigabyte support for X870E AORUS MASTER BIOS updates
+ - Extract ACPI tables: sudo acpidump > acpi_tables.dat
+ - Search for BDF/WiFi tables in DSDT
+ - Research if newer BIOS adds WCN7850 ACPI support
+
+ Step 3: Kernel Driver Patches
+ - Research upstream ath12k patches for board-id override
+ - Check kernel.org mailing list for WCN7850 fixes
+ - Test if newer kernel (6.18+) has improved board matching
+ - Document if driver patch is viable solution
+
+ Backup Contingency A: Alternative Calibration Approaches
+
+ If BIOS/kernel fixes unavailable:
+ - Extract raw board data from Windows driver properly
+ - Research QCA board data format conversion tools
+ - Contact Qualcomm Atheros developer forums
+ - Consider temporary use of Windows dual-boot for comparison testing
+
+ Backup Contingency B: Workaround Solutions
+
+ If full fix remains elusive:
+ - Document reduced range as known limitation
+ - Position system closer to primary AP
+ - Use 6GHz band (less interference despite low power)
+ - Consider mesh network expansion to compensate
+ - Keep custom board-2.bin attempts for future testing
+
+ Backup Contingency C: External Solutions
+
+ If onboard WiFi remains impractical:
+ - Research USB WiFi 7 adapters with better Linux support
+ - Check Intel AX411/AX211 M.2 card compatibility
+ - Verify X870E has accessible M.2 WiFi slot
+ - Keep WCN7850 as secondary/backup adapter
+
+ Rollback Safety
+
+ - Original firmware backed up: /lib/firmware/ath12k/WCN7850/hw2.0/board-2.bin.zst.backup-20251120
+ - Custom attempts saved: /tmp/board-2-custom.bin.zst, /tmp/board-2-gigabyte.bin.zst
+ - Can restore instantly if any step causes regression
+
+ Success Criteria
+
+ - Minimum: WiFi functional at current 1 dBm (already achieved)
+ - Target: TX power 24 dBm, detect neighbor networks
+ - Ideal: Full WiFi 7 performance with proper Gigabyte calibration
+
+ Next Action After Reboot
+
+ Start with Step 1 verification, then decide path based on findings.
+
+================================================================================
+REVERSE ENGINEERING FINDINGS - Session 2025-11-20
+================================================================================
+
+BIOS Analysis (X870EAORUSMASTER.F9e - 32MB)
+--------------------------------------------
+File: ~/Downloads/mb_bios_x870e-aorus-master_8arpl302_f9e.zip
+Version: F9e (September 2024)
+
+Findings:
+- Contains references to "wlan_driver_to_dram_load" and "WCN" strings
+- NO embedded ACPI BDF tables found via string search
+- Requires UEFIExtract tool for full structure analysis
+- Confirms BIOS lacks board data for ath12k driver selection
+
+Windows Driver Deep Dive (Qualcomm 3.1.0.1453)
+-----------------------------------------------
+File: ~/Downloads/mb_driver_2686_qualcomm_3.1.0.1453.zip
+Date: March 21, 2025 (driver version 3.1.0.1453)
+
+CRITICAL DISCOVERY: Device E0FB105B has dedicated Gigabyte configuration
+
+INF File Analysis (qcwlan64.inf line 41):
+  %QcWlan.DeviceDesc.NCM865% = QcWlan_NCM865_G.ndi, PCI\VEN_17CB&DEV_1107&SUBSYS_E0FB105B
+  
+  "_G" suffix = Gigabyte-specific configuration section
+  Uses BD_NCM865.reg registry settings
+  Uses QcWlan_BD_NCM865.CopyFiles for board files
+
+Board Data Configuration:
+  Registry Setting:
+    BDFileName = "bdwlan_wcn785x_2p0_ncm865.elf"  (generic NCM865, NOT QC_5mm!)
+    EnableCustomizedRegdomain = 4
+  
+  Installed Files:
+    - bdwlan_wcn785x_2p0_ncm865.elf (primary/generic)
+    - bdwlan_wcn785x_2p0_ncm865_QC_5mm.elf (variant - 87KB)
+    - bdwlan_wcn785x_2p0_ncm865_QC_revB.elf (variant)
+
+KEY INSIGHT: Windows driver ALSO uses generic ncm865.elf by default, not QC_5mm!
+The QC_5mm file is included but variant selection appears to happen at RUNTIME
+within the Windows driver binary (qcwlan64.sys), not via INF configuration.
+
+Comparison: Windows vs Linux Board Data
+----------------------------------------
+Windows (bdwlan_wcn785x_2p0_ncm865_QC_5mm.elf):
+  - Format: ELF 32-bit ARM executable
+  - Size: 88,888 bytes (87KB)
+  - MD5: b50cd72edef00480f784df8574a36716
+  - Data section: offset 0x400, size 87,040 bytes
+
+Linux (from board-2.bin):
+  - Format: ELF 32-bit ARM executable
+  - Size: 88,824 bytes
+  - MD5: 20e53a76edf4dc097e47389dd3fc10bb
+  - DIFFERENT calibration data (upstream generic, not Gigabyte-specific)
+
+What This Reveals:
+------------------
+1. Windows doesn't solve board-id 0xff either - uses generic ncm865 by default
+2. Gigabyte provided QC_5mm variant to Qualcomm but it's not auto-selected
+3. Runtime selection mechanism likely exists in Windows driver binary (not INF)
+4. Linux ath12k lacks this runtime variant selection logic
+5. BIOS F9e doesn't provide ACPI BDF data (confirmed via string search)
+
+Attempted Fixes & Results:
+--------------------------
+1. ✅ Modified Linux board-2.bin to force QC_5mm for e0fb
+   Result: TX power still 1 dBm (driver still reports board-id 0xff)
+   
+2. ❌ Direct Windows ELF import to Linux board-2.bin
+   Result: Firmware timeout (-110), incompatible format
+   
+3. 📊 Confirmed both OS face same hardware limitation (board-id 0xff from firmware)
+
+Next Investigation Paths:
+-------------------------
+[ ] Disassemble qcwlan64.sys to find variant selection logic
+[ ] Extract ACPI tables from running Windows vs Linux (compare)
+[ ] Use UEFIExtract to fully parse BIOS structure
+[ ] Check if Gigabyte has Linux-specific drivers/documentation
+[ ] Research if newer BIOS versions (F9f+) add ACPI BDF support
+[ ] Contact Gigabyte/Qualcomm about Linux board-id 0xff workarounds
+
+Files for Analysis:
+-------------------
+- Windows driver: /tmp/qualcomm_drivers/WLAN/qcwlan64.sys (3.7MB)
+- BIOS image: /tmp/bios_analysis/X870EAORUSMASTER.F9e (32MB)
+- Board files: /tmp/qualcomm_drivers/WLAN/bdwlan_wcn785x_2p0_ncm865*.elf
+- Backups: /lib/firmware/ath12k/WCN7850/hw2.0/board-2.bin.zst.backup-20251120
+
+
+================================================================================
+WINDOWS DRIVER REVERSE ENGINEERING - Disassembly Analysis
+================================================================================
+
+Driver Analyzed: qcwlan64.sys (3.7MB, PE32+ x86-64)
+Version: 3.1.0.1453 (March 21, 2025)
+Compiled: March 13, 2025
+
+Key Findings:
+-------------
+
+1. Board Data Path Construction
+   Function: Mp_ath_init_BDF_path_name (address offset 0x140029aef)
+   
+   Log messages found:
+   - "Add default boarddata file path len=%d BoardDataFilePath %s"
+   - "boarddata_Path+Name %s"  
+   - "[Acpi] download BDF name according to configure BDF extension %s"
+
+2. Registry-Based Configuration
+   Driver reads from Windows Registry:
+   - BDFileName = "bdwlan_wcn785x_2p0_ncm865.elf" (from INF)
+   - EnableCustomizedRegdomain = 4
+   
+   NO hardcoded variant strings found (QC_5, QC_5mm, etc.)
+   Variant selection is DYNAMIC at runtime
+
+3. ACPI BDF Extension Logic
+   Driver checks for ACPI DSDT table with BDF extension data
+   String found: "[Acpi] download BDF name according to configure BDF extension"
+   
+   This explains why Windows works but Linux doesn't:
+   - Windows driver can read ACPI DSDT for board-specific hints
+   - Linux ath12k only checks /lib/firmware files
+   - Even if BIOS lacks proper ACPI tables, Windows driver has fallback logic
+
+4. Board ID Detection
+   Format strings found:
+   - "board info valid, id %d"
+   - "chip_id: 0x%0x, chip_family: 0x%0x, board_id: 0x%0x, soc_id: 0x%0x"
+   
+   Driver logs board-id but doesn't reject 0xff
+   Uses subsystem vendor/device (105b/e0fb) for variant logic instead
+
+5. No Variant Strings in Binary
+   Searched for: QC_5, QC_5mm, ncm865, ncm825, ncm835
+   Result: NOT FOUND (only .elf extension found)
+   
+   Conclusion: Variant names constructed dynamically from:
+   - Registry BDFileName value (base filename)
+   - Runtime detection (subsystem IDs, ACPI data)
+   - String concatenation to form final .elf path
+
+Critical Insight:
+-----------------
+Windows driver DOES NOT hardcode variant selection logic. Instead:
+
+1. Reads base filename from registry: "bdwlan_wcn785x_2p0_ncm865.elf"
+2. Checks ACPI DSDT for board-specific extensions
+3. Falls back to base filename if no ACPI data
+4. Logs final path: "BoardDataFilePath %s"
+
+This means Windows ALSO uses generic ncm865.elf by default (not QC_5mm),
+unless BIOS provides ACPI BDF extension data.
+
+Linux ath12k Comparison:
+------------------------
+Linux driver (ath12k):
+- Only reads /lib/firmware/ath12k/WCN7850/hw2.0/board-2.bin
+- No registry/config file support
+- No ACPI DSDT parsing for BDF hints
+- Searches board-2.bin for matching subsystem IDs
+- Cannot override board-id 0xff from firmware
+
+Windows driver advantages:
+- Can read ACPI DSDT for vendor-specific board hints
+- Has registry fallback configuration
+- More flexible variant selection logic
+- Still logs board-id 0xff but works around it
+
+Why Both OS Show Same Limitation:
+----------------------------------
+1. Gigabyte BIOS F9e lacks ACPI BDF extension tables
+2. Without ACPI data, Windows uses generic ncm865.elf (like Linux)
+3. Both drivers receive board-id 0xff from WCN7850 firmware
+4. Neither can override hardware-reported board-id
+5. TX power limitation is firmware-enforced with generic calibration
+
+Portability Assessment:
+-----------------------
+Linux ath12k CANNOT easily port Windows logic because:
+
+❌ No equivalent to Windows Registry for per-device config
+❌ Kernel drivers can't easily read ACPI DSDT at runtime
+❌ board-2.bin format doesn't support registry-style overrides
+❌ Firmware board-id is read-only from QMI interface
+
+Possible Linux Solutions:
+1. BIOS Update - If Gigabyte adds ACPI BDF tables in newer BIOS
+2. Kernel Patch - Add module parameter for board variant override
+3. ACPI Override Table - Inject custom SSDT with BDF hints
+4. Direct Firmware - Replace WCN7850 firmware with modded version
+
+CONCLUSION:
+-----------
+The board-id 0xff limitation is HARDWARE/FIRMWARE level, not driver level.
+Windows doesn't actually solve it - Gigabyte BIOS just lacks proper ACPI tables.
+Both Windows and Linux would benefit from a BIOS update that adds ACPI BDF data.
+
+Current best option for Linux: Wait for Gigabyte BIOS update with ACPI support.
+
+
+================================================================================
+OPTION 6: HYBRID ACPI + KERNEL PATCH IMPLEMENTATION PLAN
+================================================================================
+Date: 2025-11-20
+Status: IN PROGRESS
+Risk Level: LOW (fully reversible, no BIOS modification)
+
+Overview:
+---------
+Create a two-part solution that mimics Windows driver behavior:
+1. ACPI SSDT override table providing WCN7850 board calibration hints
+2. ath12k kernel module patch to read and use ACPI hints
+
+This approach is:
+- Fully reversible (delete table + uninstall module)
+- No BIOS modification required
+- No hardware risk
+- Could be upstreamed to Linux kernel
+
+Implementation Steps:
+---------------------
+
+PHASE 1: ACPI SSDT Table Creation
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Goal: Provide board-specific hints via ACPI namespace
+
+1. Install ACPI tools:
+   sudo pacman -S acpica
+
+2. Create SSDT-WCN7850.dsl (ACPI Source Language):
+   - Define device path for WCN7850 (_SB.PCI0.GPP8.WLAN or similar)
+   - Add _DSM method (Device Specific Method) with:
+     * BoardDataFile = "bdwlan_wcn785x_2p0_ncm865_QC_5mm.elf"
+     * SubsystemVendor = 0x105b
+     * SubsystemDevice = 0xe0fb
+     * BoardVariant = "QC_5mm"
+     * MaxTxPower = 24 (dBm)
+
+3. Compile SSDT to AML (ACPI Machine Language):
+   iasl -tc SSDT-WCN7850.dsl
+
+4. Install SSDT:
+   sudo mkdir -p /boot/acpi/tables
+   sudo cp SSDT-WCN7850.aml /boot/acpi/tables/
+   
+5. Configure bootloader to load SSDT:
+   - systemd-boot: add to boot entry
+   - GRUB: add acpi_override parameter
+
+PHASE 2: ath12k Kernel Module Patch
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Goal: Read ACPI hints and override board variant selection
+
+1. Get kernel source matching current version (6.17.8-arch1-1):
+   asp checkout linux
+   cd linux/trunk
+   
+2. Create patch file: ath12k-acpi-bdf-override.patch
+   Modifications needed:
+   - drivers/net/wireless/ath/ath12k/core.c
+   - drivers/net/wireless/ath/ath12k/qmi.c
+   - Add ACPI parsing functions
+   - Override board_id selection based on ACPI hints
+   - Add debug logging for ACPI reads
+
+3. Key functions to modify:
+   - ath12k_core_fetch_board_data_api_n() - add ACPI check
+   - ath12k_qmi_load_bdf_qmi() - read ACPI variant hint
+   - Add new: ath12k_acpi_read_bdf_variant()
+
+4. Set up DKMS (Dynamic Kernel Module Support):
+   - Create /usr/src/ath12k-acpi-1.0/
+   - Copy patched source + Makefile
+   - Create dkms.conf
+   - dkms add -m ath12k-acpi -v 1.0
+   - dkms build -m ath12k-acpi -v 1.0
+   - dkms install -m ath12k-acpi -v 1.0
+
+5. Module parameters to add:
+   - acpi_bdf_override (bool, default=true)
+   - debug_acpi (bool, default=false)
+
+PHASE 3: Testing Procedure (POST-REBOOT)
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+1. Verify SSDT loaded:
+   sudo acpidump -o acpidump.dat
+   acpixtract -a acpidump.dat
+   iasl -d ssdt*.dat
+   grep -i "wcn\|wlan" ssdt*.dsl
+
+2. Check kernel module loaded:
+   lsmod | grep ath12k
+   modinfo ath12k | grep acpi
+
+3. Enable debug logging:
+   sudo dmesg -C
+   sudo modprobe -r ath12k
+   sudo modprobe ath12k acpi_bdf_override=1 debug_acpi=1
+   sudo dmesg | grep -i "acpi\|board\|variant"
+
+4. Verify TX power:
+   iw dev
+   sudo iw dev wlanX set txpower fixed 2400
+   iw dev wlanX info | grep txpower
+
+5. Test range:
+   sudo iw dev wlanX scan | grep -c "^BSS"
+   # Should detect neighbor networks now
+
+Rollback Procedure:
+-------------------
+If anything goes wrong:
+
+1. Remove SSDT:
+   sudo rm /boot/acpi/tables/SSDT-WCN7850.aml
+   # Remove from bootloader config
+   sudo reboot
+
+2. Uninstall DKMS module:
+   sudo dkms remove -m ath12k-acpi -v 1.0 --all
+   sudo rm -rf /usr/src/ath12k-acpi-1.0
+   sudo modprobe -r ath12k
+   sudo modprobe ath12k  # Load original module
+   sudo reboot
+
+3. Restore original state:
+   Everything reverts to original board-id 0xff behavior
+
+Expected Outcome:
+-----------------
+If successful:
+- ath12k reads ACPI SSDT table at module load
+- Detects BoardVariant = "QC_5mm" hint
+- Loads correct calibration from board-2.bin
+- TX power increases to 24 dBm
+- Can detect neighbor WiFi networks
+- Full WiFi 7 range restored
+
+Files to Create:
+----------------
+1. acpi/SSDT-WCN7850.dsl (ACPI source)
+2. acpi/SSDT-WCN7850.aml (compiled ACPI)
+3. kernel/ath12k-acpi-bdf-override.patch
+4. kernel/dkms.conf
+5. kernel/Makefile
+6. docs/POST-REBOOT-TEST.md (testing procedure)
+
+Timeline:
+---------
+Pre-reboot work: 1-2 hours (ACPI table + kernel patch creation)
+Reboot: 5 minutes
+Testing: 30 minutes
+Total: ~2.5 hours
+
+Risk Assessment:
+----------------
+- SSDT loading: Very low risk (just adds ACPI data)
+- Kernel module: Low risk (DKMS auto-rebuilds, easily removed)
+- WiFi bricking: Zero risk (no firmware modification)
+- System stability: Minimal risk (can boot without SSDT if needed)
+
+Status: Ready to begin implementation
+Next: Install acpica and create SSDT table
+

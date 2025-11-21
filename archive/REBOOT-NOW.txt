@@ -1,0 +1,57 @@
+╔═══════════════════════════════════════════════════════════════════╗
+║                   🚀 READY TO REBOOT                              ║
+╚═══════════════════════════════════════════════════════════════════╝
+
+PHASE 1 INSTALLATION: ✅ COMPLETE
+
+What was installed:
+-------------------
+✅ ACPI SSDT table (SSDT-WCN7850.aml) - 425 bytes
+✅ Embedded in initramfs via mkinitcpio
+✅ UKI (Unified Kernel Image) rebuilt
+✅ /boot/EFI/Linux/omarchy_linux.efi updated
+
+The ACPI table provides:
+------------------------
+• SubsystemVendor: 0x105B (Gigabyte/Foxconn)
+• SubsystemDevice: 0xE0FB (your board)
+• BoardVariant: "QC_5mm"
+• MaxTxPower: 24 dBm
+• RegulatoryDomain: "US"
+
+To reboot:
+----------
+sudo reboot
+
+After reboot:
+-------------
+1. Open: ~/dev/qualcomm-x870e-linux-bug-patch/POST-REBOOT-VERIFICATION.md
+2. Follow verification steps
+3. WiFi will still be at 1 dBm (Phase 1 only provides hints)
+4. Phase 2 (kernel patch) will read the hints and fix TX power
+
+Files ready:
+------------
+📄 POST-REBOOT-VERIFICATION.md - What to do after reboot
+📄 STATUS.md - Current project status
+📄 INSTALL.md - Installation guide (completed)
+📄 README.md - Full investigation summary
+
+Safety:
+-------
+• All changes are reversible
+• No BIOS modification
+• No hardware risk
+• Rollback: Edit /etc/mkinitcpio.conf, rebuild UKI
+
+Next steps (after reboot):
+--------------------------
+1. Verify SSDT loads (Phase 1 verification)
+2. Create kernel patch (Phase 2)
+3. Test full solution (24 dBm TX power)
+
+═══════════════════════════════════════════════════════════════════
+
+Ready to reboot? Type: sudo reboot
+
+═══════════════════════════════════════════════════════════════════

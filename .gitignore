@@ -1,0 +1,26 @@
+# Compiled ACPI files (keep .aml for distribution)
+*.hex
+
+# DSDT dumps (large, system-specific)
+acpi/dsdt.dat
+acpi/dsdt.dsl
+
+# Logs
+logs/
+
+# Analysis data (large, system-specific)
+analysis/
+
+# Driver analysis (large)
+drivers/
+
+# Firmware binaries (large, copyrighted)
+firmware/
+
+# Kernel source (can be re-downloaded)
+kernel/ath12k-source/
+
+# Temporary files
+*.tmp
+*.bak
+*~

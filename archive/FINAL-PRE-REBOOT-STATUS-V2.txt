@@ -1,0 +1,297 @@
+================================================================================
+FINAL PRE-REBOOT STATUS - SSDT v2 CORRECTED
+================================================================================
+Date: 2025-11-20 18:45
+Reboot Attempt: #2 (v2 with corrected UUID/format)
+Risk Level: LOW (fully reversible, multiple rollback options)
+
+================================================================================
+WHAT WAS CHANGED (v2 Corrections)
+================================================================================
+
+Problem Found After First Reboot:
+----------------------------------
+Driver message: "failed to get ACPI BDF EXT: 0"
+Root cause: v1 SSDT used wrong UUID, wrong function, wrong format
+
+Changes Made (v2):
+------------------
+1. Fixed UUID: f634f534-6147-11ec-90d6-0242ac120003 (wcn7850_uuid)
+2. Fixed Function 0: Returns 0x04 bitmask (indicates Function 3 support)
+3. Fixed Function 3: Returns STRING "BDFQC_5mm" (not Package)
+4. Size reduced: 425 bytes (v1) → 182 bytes (v2)
+
+Files Modified:
+---------------
+✅ /boot/acpi/tables/SSDT-WCN7850.aml (182 bytes)
+✅ /usr/lib/firmware/acpi/SSDT-WCN7850.aml (182 bytes)
+✅ /boot/EFI/Linux/omarchy_linux.efi (260MB UKI, rebuilt)
+✅ acpi/SSDT-WCN7850-v2.dsl (source with maintenance docs)
+
+Backups Created:
+----------------
+✅ acpi/SSDT-WCN7850-v1-backup.aml (425 bytes)
+✅ /etc/mkinitcpio.conf.backup-20251120
+✅ Limine snapshots: 0 available (none yet, will be created after this boot)
+
+================================================================================
+COMPREHENSIVE SAFETY VERIFICATION
+================================================================================
+
+[1] UKI File Size: 260M ✅
+    Status: Valid size, contains kernel + initramfs + SSDT
+
+[2] SSDT in /boot: OK (182 bytes) ✅
+    Location: /boot/acpi/tables/SSDT-WCN7850.aml
+    Status: Correct v2 size (was 425 in v1)
+
+[3] SSDT in /usr/lib: OK (182 bytes) ✅
+    Location: /usr/lib/firmware/acpi/SSDT-WCN7850.aml
+    Status: Embedded in initramfs by mkinitcpio
+
+[4] SSDT in UKI: OK ✅
+    Verified: lsinitcpio shows usr/lib/firmware/acpi/SSDT-WCN7850.aml
+    Status: Properly embedded in initramfs
+
+[5] limine.conf: OK ✅
+    Location: /boot/limine.conf
+    Status: Bootloader configuration intact
+
+[6] mkinitcpio ACPI: OK ✅
+    Config: FILES=(/usr/lib/firmware/acpi/*.aml ...)
+    Status: ACPI files included in initramfs generation
+
+[7] /boot mounted: YES ✅
+    Status: CRITICAL - /boot is mounted read-write
+    Mount type: BTRFS subvolume
+
+[8] Encrypt hook: OK (CRITICAL) ✅
+    Config: HOOKS=(... encrypt ...)
+    Status: CRITICAL - Encryption unlocking will work
+
+[9] WiFi device: DETECTED ✅
+    Device: Qualcomm WCN7850 at 0000:0d:00.0
+    PCI ID: 17cb:1107, Subsystem: 105b:e0fb
+
+[10] mkinitcpio backup: EXISTS ✅
+     Location: /etc/mkinitcpio.conf.backup-20251120
+     Status: Can restore if needed
+
+[11] SSDT v1 backup: EXISTS ✅
+     Location: acpi/SSDT-WCN7850-v1-backup.aml
+     Status: Can rollback to v1 if v2 fails
+
+[12] SSDT v2 size: 182 bytes (CORRECT for v2) ✅
+     Expected: 182 bytes
+     Actual: 182 bytes
+     Status: Matches compiled output
+
+[13] Limine snapshots: 0 available ⚠️
+     Status: No snapshots yet (expected, first boot)
+     Note: Snapshots will be created after successful boots
+
+================================================================================
+CRITICAL CHECKS SUMMARY
+================================================================================
+
+✅ ALL CRITICAL CHECKS PASSED
+
+Boot-Critical Systems:
+- ✅ UKI present and valid (260MB)
+- ✅ Encryption hook configured
+- ✅ /boot mounted
+- ✅ Bootloader configuration intact
+
+WiFi-Specific Systems:
+- ✅ SSDT v2 embedded in UKI
+- ✅ Correct UUID and format
+- ✅ WiFi device detected
+- ✅ v1 backup available
+
+================================================================================
+EXPECTED CHANGES AFTER REBOOT
+================================================================================
+
+Driver Messages (Before → After):
+----------------------------------
+BEFORE (v1 SSDT):
+  [15.894975] ath12k_pci 0000:0d:00.0: failed to get ACPI BDF EXT: 0
+  [15.894908] ath12k_pci 0000:0d:00.0: board_id 0xff
+
+AFTER (v2 SSDT - Expected):
+  [15.XXXXXX] ath12k_pci 0000:0d:00.0: ACPI BDF variant: QC_5mm
+  [15.XXXXXX] ath12k_pci 0000:0d:00.0: board_id 0x?? (non-0xff)
+
+WiFi Performance:
+-----------------
+Current State:
+- TX power: ~1 dBm (limited by generic calibration)
+- Network detection: Only own mesh (39 APs, all "Panic @ the Cisco")
+- Range: Very limited
+
+Expected After v2:
+- TX power: 24 dBm (proper calibration)
+- Network detection: Neighbor networks visible
+- Range: Full WiFi 7 performance
+
+Technical Changes:
+------------------
+1. Driver reads ACPI _DSM Function 3 successfully
+2. Copies "QC_5mm" to ab->qmi.target.bdf_ext
+3. Searches board-2.bin with ",variant=QC_5mm" suffix
+4. Loads proper calibration instead of generic 0xff
+
+================================================================================
+POST-REBOOT VERIFICATION STEPS
+================================================================================
+
+Step 1: Check ACPI BDF Loading
+-------------------------------
+cd ~/dev/qualcomm-x870e-linux-bug-patch
+sudo dmesg | grep -i "ACPI BDF\|board_id\|variant"
+
+Expected:
+- Should NOT see "failed to get ACPI BDF EXT"
+- Should see variant or board_id messages
+- board_id should be non-0xff
+
+Step 2: Check WiFi Interface
+-----------------------------
+iw dev wlan0 info
+
+Expected:
+- Interface present
+- No errors
+
+Step 3: Test Neighbor Network Detection
+----------------------------------------
+sudo iw dev wlan0 scan | grep -E "^BSS|SSID:" | grep -v "Panic @ the Cisco" | head -20
+
+Expected:
+- Should detect neighbor WiFi networks
+- Not just own mesh nodes
+
+Step 4: Test TX Power (If Step 3 Works)
+----------------------------------------
+sudo iw dev wlan0 set txpower fixed 2400
+iw dev wlan0 info | grep txpower
+
+Expected:
+- TX power: 24.00 dBm (2400 mBm)
+
+================================================================================
+ROLLBACK PROCEDURES (IF NEEDED)
+================================================================================
+
+Option 1: Rollback to SSDT v1 (Quick)
+--------------------------------------
+cd ~/dev/qualcomm-x870e-linux-bug-patch/acpi
+sudo cp SSDT-WCN7850-v1-backup.aml /boot/acpi/tables/SSDT-WCN7850.aml
+sudo cp SSDT-WCN7850-v1-backup.aml /usr/lib/firmware/acpi/SSDT-WCN7850.aml
+sudo mkinitcpio -P
+sudo reboot
+
+Option 2: Remove SSDT Completely (Safe Fallback)
+-------------------------------------------------
+sudo rm /boot/acpi/tables/SSDT-WCN7850.aml
+sudo rm /usr/lib/firmware/acpi/SSDT-WCN7850.aml
+sudo nano /etc/mkinitcpio.conf
+# Remove: /usr/lib/firmware/acpi/*.aml from FILES=()
+sudo mkinitcpio -P
+sudo reboot
+
+Option 3: Boot into Limine Snapshot (If Available After Future Boots)
+----------------------------------------------------------------------
+1. At Limine menu, select "Snapshot" entry
+2. Choose previous working boot
+3. System boots with previous UKI/SSDT
+
+Option 4: Emergency Recovery (If Boot Fails)
+---------------------------------------------
+See: EMERGENCY-ROLLBACK.md (from first reboot)
+- Boot from live USB
+- Mount encrypted root
+- Restore mkinitcpio.conf from backup
+- Rebuild UKI without SSDT
+
+================================================================================
+WHAT'S DIFFERENT FROM FIRST REBOOT
+================================================================================
+
+Changes from v1 → v2:
+---------------------
+1. ✅ Corrected UUID (wcn7850_uuid from driver)
+2. ✅ Corrected function (Function 3 instead of 1)
+3. ✅ Corrected format (STRING instead of Package)
+4. ✅ Smaller size (182 vs 425 bytes)
+5. ✅ Better documentation for future updates
+
+Safety Improvements:
+--------------------
+1. ✅ v1 SSDT backed up (can rollback)
+2. ✅ Comprehensive pre-reboot checks
+3. ✅ Same encryption/boot safety as first reboot
+4. ✅ Multiple rollback options documented
+
+Risk Assessment:
+----------------
+- Hardware risk: ZERO (no BIOS modification)
+- Boot risk: MINIMAL (encryption hook verified, /boot mounted)
+- Rollback: EASY (4 documented options)
+- Data risk: NONE (read-only ACPI table)
+
+================================================================================
+TECHNICAL REFERENCE
+================================================================================
+
+SSDT v2 Logic:
+--------------
+1. Function 0: Query → Returns 0x04 (BIT(2) = Function 3 supported)
+2. Function 3: BDF_EXT → Returns "BDFQC_5mm"
+3. Driver copies "QC_5mm" (everything after "BDF") to bdf_ext
+4. Board search: "...,variant=QC_5mm"
+5. Loads proper calibration from board-2.bin
+
+Driver Code Path:
+-----------------
+1. ath12k_acpi_dsm_get_data() - Reads _DSM Function 3
+2. Validates: starts with "BDF", length 4-100
+3. Copies to ab->acpi.bdf_string
+4. ath12k_acpi_check_bdf_variant_name() - Extracts variant
+5. strscpy(ab->qmi.target.bdf_ext, ab->acpi.bdf_string + 4, ...)
+6. ath12k_core_create_board_name() - Appends ",variant=QC_5mm"
+7. ath12k_core_fetch_board_data_api_n() - Searches board-2.bin
+
+Source Files:
+-------------
+- drivers/net/wireless/ath/ath12k/acpi.c (ACPI reading)
+- drivers/net/wireless/ath/ath12k/hw.c (wcn7850_uuid definition)
+- drivers/net/wireless/ath/ath12k/core.c (board file search)
+
+================================================================================
+FINAL STATUS: READY TO REBOOT
+================================================================================
+
+All safety checks: ✅ PASSED
+All critical systems: ✅ VERIFIED
+All backups: ✅ CREATED
+All rollback options: ✅ DOCUMENTED
+
+Command to reboot:
+------------------
+sudo reboot
+
+After reboot, check:
+--------------------
+cd ~/dev/qualcomm-x870e-linux-bug-patch
+sudo dmesg | grep -i "ACPI BDF\|board_id\|variant"
+sudo iw dev wlan0 scan | grep -E "^BSS|SSID:" | head -40
+
+Expected outcome:
+-----------------
+✅ ACPI BDF variant loaded successfully
+✅ board_id changes from 0xff to device-specific
+✅ TX power increases to 24 dBm
+✅ Neighbor networks detected
+
+================================================================================
