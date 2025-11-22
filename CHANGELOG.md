@@ -4,9 +4,42 @@ All notable changes to this project are documented in this file.
 
 ---
 
-## [v4.0] - 2025-11-21 15:30 - board-2.bin Firmware Override
+## [v5.0] - 2025-11-21 23:45 - WORKING FIX - Entry Priority Fix
 
-### Root Cause Discovered
+### Actual Root Cause Discovered
+- **e0fb entry EXISTS in upstream** - was NOT missing!
+- Entry was in MULTIPLE groups: generic `e0ee`, generic `e0dc`, and `QC_5mm` variant
+- Driver searches WITHOUT variant when ACPI fails
+- Finds generic `e0ee` group FIRST → wrong calibration → low TX power
+- Bluetooth uses same calibration → crashes on scan
+
+### The Fix
+1. Removed `e0fb` from all non-variant groups (e0ee and e0dc)
+2. Added standalone `e0fb` entry at position [0] pointing to `QC_5mm.bin`
+3. Driver now finds correct entry first → proper calibration
+
+### Results - VERIFIED WORKING
+| Metric | Before | After |
+|--------|--------|-------|
+| WiFi Networks | Only own mesh | **40+ networks** |
+| Bluetooth | Crash on scan | **Stable, finds devices** |
+| Signal Range | None visible | -59 to -82 dBm |
+
+### Technical Details
+- Created `fix-e0fb-entry.py` to modify board-2.json
+- `BoardNames[0]` now contains standalone e0fb entry
+- Points to `e0dc...variant=QC_5mm.bin` calibration data
+
+### Files Created
+- `board-2-fixed.json` - Fixed JSON with standalone entry
+- `board-2-fixed.bin` - Rebuilt firmware binary
+- `fix-e0fb-entry.py` - Automation script
+
+---
+
+## [v4.0] - 2025-11-21 15:30 - board-2.bin Firmware Override (INCOMPLETE)
+
+### Root Cause Discovered (INCORRECT)
 - **Subsystem ID `105b:e0fb` is MISSING from linux-firmware's board-2.bin**
 - Driver searches for calibration data by PCI subsystem ID
 - Missing entry causes fallback to `board_id 0xff` (generic)

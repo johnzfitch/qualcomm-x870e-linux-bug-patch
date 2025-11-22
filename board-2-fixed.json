@@ -3,6 +3,12 @@
         "board": [
             {
                 "names": [
+                    "bus=pci,vendor=17cb,device=1107,subsystem-vendor=105b,subsystem-device=e0fb,qmi-chip-id=2,qmi-board-id=255"
+                ],
+                "data": "bus=pci,vendor=17cb,device=1107,subsystem-vendor=105b,subsystem-device=e0dc,qmi-chip-id=2,qmi-board-id=255,variant=QC_5mm.bin"
+            },
+            {
+                "names": [
                     "bus=pci,vendor=17cb,device=1107,subsystem-vendor=17cb,subsystem-device=3378,qmi-chip-id=2,qmi-board-id=260"
                 ],
                 "data": "bus=pci,vendor=17cb,device=1107,subsystem-vendor=17cb,subsystem-device=3378,qmi-chip-id=2,qmi-board-id=260.bin"
@@ -70,12 +76,6 @@
                     "bus=pci,vendor=17cb,device=1107,subsystem-vendor=105b,subsystem-device=e125,qmi-chip-id=2,qmi-board-id=255"
                 ],
                 "data": "bus=pci,vendor=17cb,device=1107,subsystem-vendor=105b,subsystem-device=e0ee,qmi-chip-id=2,qmi-board-id=255.bin"
-            },
-            {
-                "names": [
-                    "bus=pci,vendor=17cb,device=1107,subsystem-vendor=105b,subsystem-device=e0fb,qmi-chip-id=2,qmi-board-id=255"
-                ],
-                "data": "bus=pci,vendor=17cb,device=1107,subsystem-vendor=105b,subsystem-device=e0dc,qmi-chip-id=2,qmi-board-id=255,variant=QC_5mm.bin"
             },
             {
                 "names": [
@@ -147,6 +147,7 @@
                     "bus=pci,vendor=17cb,device=1107,subsystem-vendor=105b,subsystem-device=e0ea,qmi-chip-id=2,qmi-board-id=255,variant=QC_5mm",
                     "bus=pci,vendor=17cb,device=1107,subsystem-vendor=105b,subsystem-device=e0ed,qmi-chip-id=2,qmi-board-id=255,variant=QC_5mm",
                     "bus=pci,vendor=17cb,device=1107,subsystem-vendor=105b,subsystem-device=e0f7,qmi-chip-id=2,qmi-board-id=255,variant=QC_5mm",
+                    "bus=pci,vendor=17cb,device=1107,subsystem-vendor=105b,subsystem-device=e0fb,qmi-chip-id=2,qmi-board-id=255,variant=QC_5mm",
                     "bus=pci,vendor=17cb,device=1107,subsystem-vendor=105b,subsystem-device=e109,qmi-chip-id=2,qmi-board-id=255,variant=QC_5mm",
                     "bus=pci,vendor=17cb,device=1107,subsystem-vendor=105b,subsystem-device=e10a,qmi-chip-id=2,qmi-board-id=255,variant=QC_5mm",
                     "bus=pci,vendor=17cb,device=1107,subsystem-vendor=1eac,subsystem-device=8000,qmi-chip-id=2,qmi-board-id=255,variant=QC_5mm"

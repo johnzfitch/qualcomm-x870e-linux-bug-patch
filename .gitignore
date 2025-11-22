@@ -27,8 +27,17 @@ kernel/ath12k-source/
 
 # Board data extraction working files
 board-2.bin
+board-2-new.bin
+board-2-fixed.bin
 bus=pci,*.bin
 *.regdb
+extracted-boards/
+
+# Windows driver investigation files
+board-2-windows.bin
+board-2-windows.bin.zst
+board-2-windows.json
+windows-*.elf
 
 # External tools (clone separately)
 qca-swiss-army-knife/

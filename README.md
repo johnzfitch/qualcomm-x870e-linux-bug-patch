@@ -1,8 +1,8 @@
 # Qualcomm WCN7850 WiFi 7 - Linux Firmware Fix
 
-**Hardware**: Gigabyte X870E AORUS MASTER
+**Hardware**: Gigabyte X870E AORUS XTREME AI TOP (QCNCM865 module)
 **WiFi**: Qualcomm WCN7850 hw2.0 (FastConnect 7800)
-**Status**: Fixed via board-2.bin firmware override - pending reboot test
+**Status**: FIXED - WiFi sees 40+ networks, Bluetooth working
 
 ---
 
@@ -17,18 +17,32 @@ ath12k_pci 0000:0d:00.0: board_id 0xff
 
 ## Root Cause
 
-The `board-2.bin` firmware file contains calibration data entries indexed by PCI subsystem ID. Our device's subsystem ID (`105b:e0fb`) simply doesn't exist in the upstream linux-firmware package - causing the driver to fall back to `board_id 0xff`.
+**Incorrect**: Originally thought `105b:e0fb` was missing from linux-firmware.
+
+**Actual Problem**: The `e0fb` entry EXISTS in upstream board-2.bin, but in MULTIPLE groups:
+1. Generic `e0ee` group (wrong calibration) ← **Driver finds this FIRST**
+2. Generic `e0dc` group (also generic)
+3. `e0dc,variant=QC_5mm` group (correct calibration)
+
+When ACPI BDF lookup fails (as it does for us), the driver searches board-2.bin WITHOUT variant, finds the generic `e0ee` entry first, and uses conservative TX power calibration.
+
+**Result**: Low TX power (~1 dBm), can only see own mesh network, Bluetooth crashes on scan.
 
 ## Solution
 
-Custom board-2.bin firmware that adds the missing `105b:e0fb` subsystem ID entry, with a pacman hook for persistence across linux-firmware updates.
+Modify board-2.bin to:
+1. **Remove** `e0fb` from all generic (non-variant) groups
+2. **Add** standalone `e0fb` entry at position [0] pointing to `QC_5mm.bin` calibration data
+
+This ensures the driver finds the correct entry first during search.
 
 ### Current State
 
 | Item | Status |
 |------|--------|
-| WiFi Performance | ~910 Mbps (working) |
-| board_id | 0xff -> pending fix verification |
+| WiFi Networks | 40+ detected (was: only own mesh) |
+| Bluetooth | Working, stable (was: crash on scan) |
+| board_id | Still 0xff (hardware-reported, expected) |
 | Custom board-2.bin | Installed |
 | Pacman hook | Active (survives updates) |
 
@@ -85,8 +99,11 @@ sudo dmesg | grep -i "105b:e0fb\|e0fb"
 ```
 Project Files:
 ├── board-2.bin.zst                    # Custom firmware (source of truth)
-├── board-2-custom.json                # Board data definition with e0fb entry
+├── board-2-fixed.json                 # Fixed JSON with standalone e0fb entry
+├── board-2-fixed.bin                  # Rebuilt board-2.bin
+├── fix-e0fb-entry.py                  # Script to fix JSON
 ├── board-2.json                       # Original extracted board data
+├── qca-swiss-army-knife/              # Qualcomm tools (ath12k-bdencoder)
 
 System Files:
 ├── /usr/lib/firmware/ath12k/WCN7850/hw2.0/board-2.bin.zst  # Installed firmware

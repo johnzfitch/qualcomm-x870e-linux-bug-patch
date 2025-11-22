@@ -67,7 +67,8 @@
                     "bus=pci,vendor=17cb,device=1107,subsystem-vendor=14cd,subsystem-device=940a,qmi-chip-id=2,qmi-board-id=255",
                     "bus=pci,vendor=17cb,device=1107,subsystem-vendor=105b,subsystem-device=e114,qmi-chip-id=2,qmi-board-id=255",
                     "bus=pci,vendor=17cb,device=1107,subsystem-vendor=105b,subsystem-device=e122,qmi-chip-id=2,qmi-board-id=255",
-                    "bus=pci,vendor=17cb,device=1107,subsystem-vendor=105b,subsystem-device=e125,qmi-chip-id=2,qmi-board-id=255"
+                    "bus=pci,vendor=17cb,device=1107,subsystem-vendor=105b,subsystem-device=e125,qmi-chip-id=2,qmi-board-id=255",
+                    "bus=pci,vendor=17cb,device=1107,subsystem-vendor=105b,subsystem-device=e0fb,qmi-chip-id=2,qmi-board-id=255"
                 ],
                 "data": "bus=pci,vendor=17cb,device=1107,subsystem-vendor=105b,subsystem-device=e0ee,qmi-chip-id=2,qmi-board-id=255.bin"
             },

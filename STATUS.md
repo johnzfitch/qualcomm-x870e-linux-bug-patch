@@ -1,8 +1,8 @@
 # Current Status
 
-**Last Updated**: 2025-11-21 15:30 PST
-**Fix Method**: board-2.bin firmware override
-**WiFi Status**: Operational - pending reboot test for fix verification
+**Last Updated**: 2025-11-22
+**Fix Method**: board-2.bin firmware override (entry priority fix)
+**WiFi Status**: WORKING - Full TX power, WiFi and Bluetooth operational
 
 ---
 
@@ -11,59 +11,78 @@
 | Component | Status | Notes |
 |-----------|--------|-------|
 | WiFi Hardware | Working | WCN7850 hw2.0 operational |
-| WiFi Performance | ~910 Mbps | Works despite board_id 0xff |
-| Custom board-2.bin | Installed | Added 105b:e0fb entry |
+| WiFi TX Power | 30 dBm (2.4/6 GHz), 24 dBm (5 GHz) | Full power achieved |
+| WiFi Networks | Visible | Scanning works correctly |
+| Bluetooth | Working | Controller active, devices scannable |
+| Custom board-2.bin | Installed | Standalone e0fb entry at position [0] |
 | Pacman hook | Active | Survives linux-firmware updates |
-| board_id | 0xff | Pending fix verification after reboot |
+| board_id | 0xff | Hardware-reported (expected) |
 
 ---
 
-## Root Cause Discovered (2025-11-21)
+## Root Cause (Corrected)
 
-**The subsystem ID `105b:e0fb` is missing from linux-firmware's board-2.bin.**
+**Original assumption**: `105b:e0fb` was missing from linux-firmware's board-2.bin.
 
-The driver searches for calibration data by PCI subsystem ID. Since Gigabyte X870E's ID (`105b:e0fb`) doesn't exist in the firmware file, it falls back to `board_id 0xff` (generic).
+**Actual problem**: The `e0fb` entry EXISTS in upstream but in MULTIPLE groups:
+1. Generic `e0ee` group (wrong calibration) - **Driver finds this FIRST**
+2. Generic `e0dc` group (also generic)
+3. `e0dc,variant=QC_5mm` group (correct calibration)
 
-This explains why:
-- ACPI SSDT approach couldn't help (driver reads board data from firmware, not ACPI)
-- `failed to get ACPI BDF EXT: 0` appears (BIOS lacks tables, but that's not the real problem)
-- WiFi works but with limited TX power
+When ACPI BDF lookup fails, the driver searches board-2.bin WITHOUT variant, finds the generic `e0ee` entry first, and uses conservative TX power calibration.
 
----
-
-## Fix Implemented
-
-### 1. Custom board-2.bin
-Added entry for `105b:e0fb` using calibration data from the similar `e0dc` variant:
-
-```
-bus=pci,vendor=17cb,device=1107,subsystem-vendor=105b,subsystem-device=e0fb,qmi-chip-id=2,qmi-board-id=255,variant=QC_5mm
-```
-
-### 2. Pacman Hook
-Created `/etc/pacman.d/hooks/99-wcn7850-board-fix.hook` to restore custom firmware after linux-firmware updates.
-
-### 3. Restore Script
-Created `/usr/local/bin/wcn7850-board-fix.sh` to copy custom firmware from this repository to system location.
+**Result before fix**: Low TX power (~1 dBm), limited network visibility, Bluetooth crashes on scan.
 
 ---
 
-## SSDT Approach (Historical)
+## Fix Implemented (v5.0)
 
-The ACPI SSDT v3 is still installed but ineffective:
+### Solution
+1. **Remove** `e0fb` from all generic (non-variant) groups
+2. **Add** standalone `e0fb` entry at position [0] pointing to `QC_5mm.bin` calibration data
 
-**SSDT loads at early boot:**
+This ensures the driver finds the correct entry first during search.
+
+### Files
+- `board-2-fixed.json` - Fixed JSON with standalone entry at [0]
+- `board-2-fixed.bin` - Rebuilt board-2.bin
+- `fix-e0fb-entry.py` - Script to modify board-2.json
+
+### BoardNames[0] Entry
 ```
-[    0.003804] ACPI: Table Upgrade: install [SSDT- GBYTE- WCN7850]
-[    0.003805] ACPI: SSDT 0x0000000099ED4000 0000B3 (v02 GBYTE WCN7850 00000003 INTL 20250404)
+bus=pci,vendor=17cb,device=1107,subsystem-vendor=105b,subsystem-device=e0fb,qmi-chip-id=2,qmi-board-id=255
+```
+Points to `QC_5mm.bin` calibration data (88824 bytes).
+
+---
+
+## Verification Results
+
+### WiFi
+```
+Interface wlan0
+    type managed
+    wiphy 0
+
+TX Power (from iw phy):
+    2.4 GHz: 30.0 dBm
+    5 GHz: 24.0 dBm
+    6 GHz: 30.0 dBm
 ```
 
-**Driver still fails to read it:**
+### Bluetooth
 ```
-[   16.999424] ath12k_pci 0000:0d:00.0: failed to get ACPI BDF EXT: 0
+Controller C8:A3:E8:11:B6:EA
+    Powered: yes
+    TX Power Range: -32 to +15 dBm
 ```
 
-**Conclusion:** The ath12k driver's ACPI lookup mechanism doesn't find _DSM methods on the device. The board-2.bin firmware approach is more direct and should work.
+### Kernel Log
+```
+ath12k_pci 0000:0d:00.0: chip_id 0x2 chip_family 0x4 board_id 0xff soc_id 0x40170200
+ath12k_pci 0000:0d:00.0: failed to get ACPI BDF EXT: 0
+```
+Note: `board_id 0xff` and ACPI BDF failure are normal - the fix works by providing correct board data lookup, not by changing board_id.
 
 ---
 
@@ -75,13 +94,9 @@ The ACPI SSDT v3 is still installed but ineffective:
 - **Pacman hook**: `/etc/pacman.d/hooks/99-wcn7850-board-fix.hook`
 - **Restore script**: `/usr/local/bin/wcn7850-board-fix.sh`
 
-### Bootloader
-- **Type**: Limine (UKI-based)
-- **UKI Location**: `/boot/EFI/Linux/omarchy_linux.efi`
-
 ### Network
-- **Ethernet**: Atlantic 10GbE (enp16s0) - 10Gbps link
-- **WiFi**: Qualcomm WCN7850 (wlan1) - Currently active
+- **Ethernet**: Atlantic 10GbE (enp16s0)
+- **WiFi**: Qualcomm WCN7850 (wlan0)
 
 ---
 
@@ -95,67 +110,21 @@ The ACPI SSDT v3 is still installed but ineffective:
 ├── CHANGELOG.md                 # Version history
 ├── EMERGENCY-ROLLBACK.md        # Rollback procedures
 │
-├── board-2.bin.zst              # Custom firmware with e0fb entry
-├── board-2-custom.json          # Board data definition
+├── board-2.bin.zst              # Custom firmware (installed)
+├── board-2-fixed.bin            # Rebuilt binary
+├── board-2-fixed.json           # Fixed JSON definition
 ├── board-2.json                 # Original extracted data
+├── fix-e0fb-entry.py            # Fix automation script
 │
 ├── acpi/                        # Historical SSDT files
-│   ├── SSDT-WCN7850.aml         # Compiled SSDT (v3)
-│   ├── SSDT-WCN7850-v3.dsl      # v3 source
-│   └── ...
-│
 ├── dkms/                        # Alternative kernel patch approach
-│   └── ath12k-wcn7850-fix/
-│       └── 0001-ath12k-add-bdf-variant-fallback.patch
-│
 └── qca-swiss-army-knife/        # Qualcomm firmware tools
 
 System Files:
 ├── /usr/lib/firmware/ath12k/WCN7850/hw2.0/board-2.bin.zst
 ├── /etc/pacman.d/hooks/99-wcn7850-board-fix.hook
-├── /usr/local/bin/wcn7850-board-fix.sh
-├── /etc/initcpio/acpi_override/SSDT-WCN7850.aml  # Historical
-└── /etc/mkinitcpio.conf.d/zz-acpi-override.conf  # Historical
+└── /usr/local/bin/wcn7850-board-fix.sh
 ```
-
----
-
-## Next Steps
-
-### Immediate: Reboot to Test
-```bash
-sudo reboot
-```
-
-### After Reboot: Verify Fix
-```bash
-# Check if board_id changed from 0xff
-sudo dmesg | grep -i "board_id"
-
-# Check for our subsystem ID
-sudo dmesg | grep -i "e0fb\|105b"
-
-# Check WiFi interface
-iw dev
-
-# Check TX power
-iw dev wlan1 info | grep txpower
-
-# Speed test
-# Connect to network and test throughput
-```
-
-### Expected Outcomes
-
-**If fix works:**
-- board_id changes from 0xff to something else
-- TX power increases (>1 dBm)
-- Possibly better range/stability
-
-**If fix doesn't work:**
-- board_id still 0xff
-- May need to investigate driver's exact firmware lookup logic
-- Or the calibration data format needs adjustment
 
 ---
 
@@ -179,7 +148,6 @@ sudo reboot
 
 - **PCI ID**: 17cb:1107 (Qualcomm WCN7850)
 - **Subsystem ID**: 105b:e0fb (Gigabyte X870E)
-- **ACPI Path**: `\_SB.PCI0.GPP7.UP00.DP40.UP00.DP10.WN00`
 - **Firmware Location**: `/usr/lib/firmware/ath12k/WCN7850/hw2.0/`
 - **Kernel**: 6.17.8-arch1-1
 - **Driver**: ath12k (in-tree)
