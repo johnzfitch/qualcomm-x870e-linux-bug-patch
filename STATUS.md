@@ -1,8 +1,8 @@
 # Current Status
 
-**Last Updated**: 2025-11-21 14:10 PST
-**SSDT Version**: v3 (pending reboot test)
-**WiFi Status**: Operational at ~910 Mbps (board_id 0xff, limited TX power)
+**Last Updated**: 2025-11-21 14:25 PST
+**SSDT Version**: v3 (tested - loads at boot, driver needs patch)
+**WiFi Status**: Operational (board_id 0xff, limited TX power)
 
 ---
 
@@ -11,10 +11,27 @@
 | Component | Status | Notes |
 |-----------|--------|-------|
 | WiFi Hardware | Working | WCN7850 hw2.0 operational |
-| WiFi Performance | ~910 Mbps | Despite board_id 0xff limitation |
-| SSDT v3 | Ready | Installed via acpi_override hook |
-| board_id | 0xff | Generic fallback (root cause) |
-| ACPI BDF EXT | Failing | `failed to get ACPI BDF EXT: 0` |
+| WiFi Performance | Variable | Works despite board_id 0xff limitation |
+| SSDT v3 | Loads at boot | `Table Upgrade: install [SSDT- GBYTE- WCN7850]` at 0.003s |
+| board_id | 0xff | Generic fallback (driver can't read SSDT) |
+| ACPI BDF EXT | Failing | Driver needs kernel patch to read _DSM |
+
+---
+
+## SSDT v3 Test Results (2025-11-21)
+
+**SSDT loads at early boot:**
+```
+[    0.003804] ACPI: Table Upgrade: install [SSDT- GBYTE- WCN7850]
+[    0.003805] ACPI: SSDT 0x0000000099ED4000 0000B3 (v02 GBYTE WCN7850 00000003 INTL 20250404)
+```
+
+**Driver still fails to read it:**
+```
+[   16.999424] ath12k_pci 0000:0d:00.0: failed to get ACPI BDF EXT: 0
+```
+
+**Conclusion:** The `acpi_override` hook correctly places SSDT in early CPIO. The ath12k driver's `ath12k_acpi_dsm_get_data()` function doesn't find our _DSM method. **Kernel patch required.**
 
 ---
 
@@ -24,7 +41,7 @@
 |---------|-----------|--------|-------|
 | v1 | `\_SB.PCI0.WCN7` | Failed | Wrong UUID, wrong function, wrong format |
 | v2 | `\_SB.PCI0.WCN7` | Failed | Correct UUID/format, but wrong device path |
-| **v3** | `\_SB.PCI0.GPP7.UP00.DP40.UP00.DP10.WN00` | **Pending** | Correct path from firmware_node |
+| **v3** | `\_SB.PCI0.GPP7.UP00.DP40.UP00.DP10.WN00` | **Loads, not read** | Driver needs kernel patch |
 
 ### Key Discovery (v3)
 The actual ACPI path for the WiFi device was found via:
