@@ -1,0 +1,60 @@
+--- a/drivers/net/wireless/ath/ath12k/acpi.c
++++ b/drivers/net/wireless/ath/ath12k/acpi.c
+@@ -14,9 +14,17 @@ static int ath12k_acpi_dsm_get_data(struct ath12k_base *ab, int func)
+ 	int ret, i;
+
+ 	root_handle = ACPI_HANDLE(ab->dev);
++	ath12k_info(ab, "DEBUG: ath12k_acpi_dsm_get_data func=%d, ACPI_HANDLE=%px\n",
++		    func, root_handle);
++
+ 	if (!root_handle) {
+-		ath12k_dbg(ab, ATH12K_DBG_BOOT, "invalid acpi handler\n");
++		ath12k_warn(ab, "DEBUG: ACPI_HANDLE returned NULL for device %s\n",
++			    dev_name(ab->dev));
+ 		return -EOPNOTSUPP;
++	} else {
++		struct acpi_device *adev = ACPI_COMPANION(ab->dev);
++		ath12k_info(ab, "DEBUG: ACPI companion device: %s (path: %s)\n",
++			    adev ? dev_name(&adev->dev) : "NULL", acpi_device_hid(adev));
+ 	}
+
+ 	obj = acpi_evaluate_dsm(root_handle, ab->hw_params->acpi_guid, 0, func,
+@@ -24,10 +32,16 @@ static int ath12k_acpi_dsm_get_data(struct ath12k_base *ab, int func)
+
+ 	if (!obj) {
+ 		ath12k_dbg(ab, ATH12K_DBG_BOOT, "acpi_evaluate_dsm() failed\n");
++		ath12k_warn(ab, "DEBUG: acpi_evaluate_dsm returned NULL for func %d\n", func);
+ 		return -ENOENT;
+ 	}
+
++	ath12k_info(ab, "DEBUG: acpi_evaluate_dsm returned obj type=%d for func=%d\n",
++		    obj->type, func);
++
+ 	if (obj->type == ACPI_TYPE_INTEGER) {
++		ath12k_info(ab, "DEBUG: INTEGER value=0x%llx for func=%d\n",
++			    obj->integer.value, func);
+ 		switch (func) {
+ 		case ATH12K_ACPI_DSM_FUNC_SUPPORT_FUNCS:
+ 			ab->acpi.func_bit = obj->integer.value;
+@@ -37,6 +51,8 @@ static int ath12k_acpi_dsm_get_data(struct ath12k_base *ab, int func)
+ 			break;
+ 		}
+ 	} else if (obj->type == ACPI_TYPE_STRING) {
++		ath12k_info(ab, "DEBUG: STRING len=%d value='%s' for func=%d\n",
++			    obj->string.length, obj->string.pointer, func);
+ 		switch (func) {
+ 		case ATH12K_ACPI_DSM_FUNC_BDF_EXT:
+ 			if (obj->string.length <= ATH12K_ACPI_BDF_ANCHOR_STRING_LEN ||
+@@ -55,6 +71,9 @@ static int ath12k_acpi_dsm_get_data(struct ath12k_base *ab, int func)
+ 			break;
+ 		}
+ 	} else if (obj->type == ACPI_TYPE_BUFFER) {
++		ath12k_info(ab, "DEBUG: BUFFER len=%d for func=%d, first bytes: %02x %02x %02x %02x\n",
++			    obj->buffer.length, func,
++			    obj->buffer.length > 0 ? obj->buffer.pointer[0] : 0,
++			    obj->buffer.length > 1 ? obj->buffer.pointer[1] : 0,
++			    obj->buffer.length > 2 ? obj->buffer.pointer[2] : 0,
++			    obj->buffer.length > 3 ? obj->buffer.pointer[3] : 0);
+ 		switch (func) {
+ 		case ATH12K_ACPI_DSM_FUNC_SUPPORT_FUNCS:
+ 			if (obj->buffer.length < ATH12K_ACPI_DSM_FUNC_MIN_BITMAP_SIZE ||

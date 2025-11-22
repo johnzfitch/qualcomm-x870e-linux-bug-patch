@@ -1,20 +1,27 @@
-# Installation Guide - WCN7850 ACPI Override
+# Installation Guide - WCN7850 Firmware Fix
 
-**System**: Arch Linux with Limine bootloader (UKI)
+**System**: Arch Linux
 **Last Updated**: 2025-11-21
+
+---
+
+## Overview
+
+This fix adds the missing subsystem ID `105b:e0fb` (Gigabyte X870E) to the WCN7850 board calibration firmware. The fix includes a pacman hook for persistence across linux-firmware updates.
 
 ---
 
 ## Prerequisites
 
-- ACPI compiler: `sudo pacman -S acpica`
-- Root access for system modifications
+- Arch Linux (or derivative)
+- Root access for firmware installation
+- Git (to clone this repository)
 
 ---
 
-## Quick Install (Current State)
+## Quick Install
 
-SSDT v3 is already installed. Just reboot:
+If the fix is already installed on this system, just reboot:
 
 ```bash
 sudo reboot
@@ -22,84 +29,71 @@ sudo reboot
 
 ---
 
-## Full Installation Steps
+## Fresh Installation
 
-### Step 1: Compile SSDT (if needed)
+### Step 1: Clone Repository
 
 ```bash
-cd ~/dev/qualcomm-x870e-linux-bug-patch/acpi
-
-# Compile v3 source
-iasl -tc SSDT-WCN7850-v3.dsl
-
-# Output: SSDT-WCN7850.aml (179 bytes)
+git clone https://github.com/johnzfitch/qualcomm-x870e-linux-bug-patch.git
+cd qualcomm-x870e-linux-bug-patch
 ```
 
-### Step 2: Install SSDT to acpi_override directory
-
-The `acpi_override` hook reads from `/etc/initcpio/acpi_override/`:
+### Step 2: Install Custom Firmware
 
 ```bash
-# Create directory for ACPI override hook
-sudo mkdir -p /etc/initcpio/acpi_override
+# Backup original firmware
+sudo cp /usr/lib/firmware/ath12k/WCN7850/hw2.0/board-2.bin.zst \
+        /usr/lib/firmware/ath12k/WCN7850/hw2.0/board-2.bin.zst.bak
 
-# Copy compiled SSDT
-sudo cp acpi/SSDT-WCN7850.aml /etc/initcpio/acpi_override/
-
-# Verify
-ls -la /etc/initcpio/acpi_override/
+# Install custom firmware
+sudo cp board-2.bin.zst /usr/lib/firmware/ath12k/WCN7850/hw2.0/board-2.bin.zst
 ```
 
-### Step 3: Configure mkinitcpio Hook
+### Step 3: Install Pacman Hook (Persistence)
 
-Create a drop-in config to add the `acpi_override` hook:
+The pacman hook ensures the custom firmware is restored after linux-firmware package updates.
 
 ```bash
-sudo tee /etc/mkinitcpio.conf.d/zz-acpi-override.conf << 'EOF'
-# WCN7850 WiFi ACPI board data fix - DO NOT DELETE
-# This adds acpi_override hook for early SSDT loading
-# The hook loads SSDTs from /etc/initcpio/acpi_override/
-HOOKS+=(acpi_override)
+# Create restore script
+sudo tee /usr/local/bin/wcn7850-board-fix.sh << 'EOF'
+#!/bin/bash
+# WCN7850 board-2.bin fix for Gigabyte X870E (subsystem 105b:e0fb)
+# This script restores the custom board-2.bin after linux-firmware updates
+
+CUSTOM_BOARD="$HOME/dev/qualcomm-x870e-linux-bug-patch/board-2.bin.zst"
+TARGET="/usr/lib/firmware/ath12k/WCN7850/hw2.0/board-2.bin.zst"
+
+if [ -f "$CUSTOM_BOARD" ]; then
+    cp "$CUSTOM_BOARD" "$TARGET"
+    echo "WCN7850 board-2.bin restored with e0fb fix"
+else
+    echo "Warning: Custom board-2.bin not found at $CUSTOM_BOARD"
+fi
+EOF
+
+sudo chmod +x /usr/local/bin/wcn7850-board-fix.sh
+```
+
+**Note**: Update `CUSTOM_BOARD` path if you cloned the repository elsewhere.
+
+```bash
+# Create pacman hook
+sudo tee /etc/pacman.d/hooks/99-wcn7850-board-fix.hook << 'EOF'
+[Trigger]
+Operation = Install
+Operation = Upgrade
+Type = Package
+Target = linux-firmware
+Target = linux-firmware-ath
+
+[Action]
+Description = Restoring WCN7850 board-2.bin with e0fb fix...
+When = PostTransaction
+Exec = /usr/local/bin/wcn7850-board-fix.sh
 EOF
 ```
 
-**Why `zz-` prefix?** Ensures this loads after other configs (like omarchy_hooks.conf) so `HOOKS+=()` appends correctly.
-
-**Why not FILES directive?** The `FILES=()` directive puts files in the main compressed image. ACPI table upgrade requires files in an **uncompressed early CPIO**, which only the `acpi_override` hook provides via `add_file_early`.
-
-### Step 4: Rebuild UKI
-
-```bash
-# Get current kernel cmdline
-cat /proc/cmdline > /tmp/kernel-cmdline
-
-# Build new UKI
-sudo mkinitcpio --kernel $(uname -r) --uki /tmp/new_uki.efi --cmdline /tmp/kernel-cmdline
-
-# Verify acpi_override hook ran
-# Should see: "Running build hook: [acpi_override]"
-# Should see: "Early uncompressed CPIO image generation successful"
-```
-
-### Step 5: Verify SSDT in UKI
-
-```bash
-# Check SSDT is in the initramfs
-sudo lsinitcpio /tmp/new_uki.efi | grep -i acpi
-# Should show: kernel/firmware/acpi/SSDT-WCN7850.aml
-
-# Check encrypt hook is present (CRITICAL for encrypted systems)
-sudo lsinitcpio /tmp/new_uki.efi | grep -q "hooks/encrypt" && echo "OK" || echo "FAIL"
-```
-
-### Step 6: Install UKI
-
-```bash
-sudo cp /tmp/new_uki.efi /boot/EFI/Linux/omarchy_linux.efi
-sudo chmod 755 /boot/EFI/Linux/omarchy_linux.efi
-```
-
-### Step 7: Reboot
+### Step 4: Reboot
 
 ```bash
 sudo reboot
@@ -107,80 +101,108 @@ sudo reboot
 
 ---
 
-## Post-Reboot Verification
+## Post-Installation Verification
+
+After reboot, verify the fix:
 
 ```bash
-cd ~/dev/qualcomm-x870e-linux-bug-patch
+# Check if board_id changed from 0xff
+sudo dmesg | grep -i "board_id"
 
-# Check SSDT loaded at early boot (should see ACPI: SSDT ... GBYTE WCN7850)
-sudo dmesg | grep -i "ACPI.*SSDT\|GBYTE.*WCN7850"
+# Check for subsystem ID detection
+sudo dmesg | grep -i "e0fb\|105b"
 
-# Check ACPI BDF status
-sudo dmesg | grep -i "ACPI BDF\|board_id"
-
-# Check WiFi interface
+# Check WiFi interface is present
 iw dev
 
-# Scan for networks
-sudo iw dev wlan1 scan | grep -E "^BSS|SSID:" | head -20
+# Check TX power (should be higher than 1 dBm)
+iw dev wlan1 info | grep txpower
+
+# Test connectivity
+ping -c 3 8.8.8.8
 ```
 
 ### Expected Success
 
 ```
-ACPI: SSDT ... GBYTE WCN7850 ...
-ath12k_pci: ACPI BDF variant: QC_5mm
-ath12k_pci: board_id 0x?? (non-0xff)
+ath12k_pci 0000:0d:00.0: board_id 0x?? (something other than 0xff)
 ```
 
-### Expected Failure (requires kernel patch)
+### Expected Failure (Needs Investigation)
 
 ```
-ACPI: SSDT ... GBYTE WCN7850 ...  (SSDT loads)
-ath12k_pci: failed to get ACPI BDF EXT: 0  (driver can't read it)
-ath12k_pci: board_id 0xff  (still generic)
+ath12k_pci 0000:0d:00.0: board_id 0xff (still generic)
 ```
 
 ---
 
-## Bootloader Notes
+## Rebuilding Custom Firmware (Advanced)
 
-### Limine (This System)
+If you need to modify or rebuild the custom firmware:
 
-Limine uses UKI (Unified Kernel Image) which bundles:
-- Kernel
-- Initramfs (with ACPI tables in early CPIO)
-- Microcode
+### Install Tools
 
-No bootloader parameter changes needed - ACPI tables are embedded in initramfs.
+```bash
+git clone https://github.com/qca/qca-swiss-army-knife.git
+cd qca-swiss-army-knife/tools/scripts/ath12k
+```
 
-Config location: `/boot/limine.conf`
+### Extract Original
 
-### systemd-boot (Other Systems)
+```bash
+# Decompress
+zstd -d /usr/lib/firmware/ath12k/WCN7850/hw2.0/board-2.bin.zst -o board-2.bin
 
-If using systemd-boot with UKI, same process applies - the ACPI override is embedded in the UKI.
+# Extract to JSON
+./ath12k-bdencoder -e board-2.bin > board-2.json
+```
 
-### GRUB (Other Systems)
+### Modify JSON
 
-For GRUB with separate initramfs, ensure initramfs contains the early CPIO with ACPI tables.
+Add entry for `105b:e0fb` by copying an existing similar entry (e.g., `e0dc`):
+
+```json
+{
+  "names": [
+    "bus=pci,vendor=17cb,device=1107,subsystem-vendor=105b,subsystem-device=e0fb,qmi-chip-id=2,qmi-board-id=255,variant=QC_5mm"
+  ],
+  "data": "<copy from e0dc entry>"
+}
+```
+
+### Rebuild
+
+```bash
+./ath12k-bdencoder -c board-2-custom.json -o board-2.bin
+zstd board-2.bin -o board-2.bin.zst
+```
+
+---
+
+## File Locations
+
+| File | Purpose |
+|------|---------|
+| `board-2.bin.zst` | Custom firmware (source in this repo) |
+| `/usr/lib/firmware/ath12k/WCN7850/hw2.0/board-2.bin.zst` | System firmware location |
+| `/etc/pacman.d/hooks/99-wcn7850-board-fix.hook` | Pacman hook |
+| `/usr/local/bin/wcn7850-board-fix.sh` | Restore script |
 
 ---
 
 ## Rollback
 
-### Remove SSDT
+### Remove Custom Firmware
 
 ```bash
-# Remove from hook directory
-sudo rm /etc/initcpio/acpi_override/SSDT-WCN7850.aml
+# Reinstall original firmware
+sudo pacman -S linux-firmware
 
-# Optionally remove hook config
-sudo rm /etc/mkinitcpio.conf.d/zz-acpi-override.conf
+# Remove hook (prevents re-applying custom firmware)
+sudo rm /etc/pacman.d/hooks/99-wcn7850-board-fix.hook
 
-# Rebuild UKI without SSDT
-cat /proc/cmdline > /tmp/kernel-cmdline
-sudo mkinitcpio --kernel $(uname -r) --uki /tmp/new_uki.efi --cmdline /tmp/kernel-cmdline
-sudo cp /tmp/new_uki.efi /boot/EFI/Linux/omarchy_linux.efi
+# Remove script (optional)
+sudo rm /usr/local/bin/wcn7850-board-fix.sh
 
 # Reboot
 sudo reboot
@@ -188,46 +210,32 @@ sudo reboot
 
 ---
 
-## File Locations
-
-| File | Location |
-|------|----------|
-| SSDT Source (v3) | `acpi/SSDT-WCN7850-v3.dsl` |
-| SSDT Compiled | `acpi/SSDT-WCN7850.aml` |
-| System SSDT | `/etc/initcpio/acpi_override/SSDT-WCN7850.aml` |
-| Hook Config | `/etc/mkinitcpio.conf.d/zz-acpi-override.conf` |
-| UKI | `/boot/EFI/Linux/omarchy_linux.efi` |
-| Bootloader Config | `/boot/limine.conf` |
-
----
-
 ## Troubleshooting
 
-### SSDT not in initramfs
+### Custom firmware not applied after update
+
+Check if pacman hook exists and is executable:
 
 ```bash
-# Check hook config exists
-cat /etc/mkinitcpio.conf.d/zz-acpi-override.conf
-
-# Check SSDT file exists
-ls -la /etc/initcpio/acpi_override/
-
-# Rebuild and watch for "Running build hook: [acpi_override]"
-sudo mkinitcpio --kernel $(uname -r) --uki /tmp/test.efi --cmdline /tmp/kernel-cmdline 2>&1 | grep acpi
+cat /etc/pacman.d/hooks/99-wcn7850-board-fix.hook
+ls -la /usr/local/bin/wcn7850-board-fix.sh
 ```
-
-### SSDT loads but driver ignores it
-
-The driver may need a kernel patch to read _DSM from the ACPI device.
-See `docs/wifi-7-plan.txt` for kernel patching details.
 
 ### WiFi not working after reboot
 
-Boot from Limine snapshot or follow rollback steps above.
+1. Check if driver loaded: `lsmod | grep ath12k`
+2. Check dmesg for errors: `sudo dmesg | grep -i ath12k`
+3. Rollback to original firmware (see above)
 
-### acpi_override hook not found
+### board_id still 0xff
 
-Install mkinitcpio (it's a built-in hook):
-```bash
-pacman -S mkinitcpio
-```
+The firmware entry format may need adjustment. Check:
+- Is the subsystem ID format correct?
+- Is the calibration data valid for this board variant?
+- Try using a different variant's calibration data
+
+---
+
+## Historical: SSDT Approach
+
+The ACPI SSDT approach (files in `acpi/` directory) was tried first but doesn't work - the ath12k driver doesn't read _DSM methods from the device. The SSDT files remain for reference but are not part of the active fix.

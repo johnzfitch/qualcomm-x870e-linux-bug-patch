@@ -24,3 +24,12 @@ kernel/ath12k-source/
 *.tmp
 *.bak
 *~
+
+# Board data extraction working files
+board-2.bin
+bus=pci,*.bin
+*.regdb
+
+# External tools (clone separately)
+qca-swiss-army-knife/
+firmware-work/

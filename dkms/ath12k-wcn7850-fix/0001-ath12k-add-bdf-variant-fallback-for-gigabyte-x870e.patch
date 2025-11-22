@@ -1,0 +1,97 @@
+From: Zack <zack@local>
+Subject: [PATCH] ath12k: Add BDF variant fallback for Gigabyte X870E WCN7850
+
+On Gigabyte X870E AORUS MASTER motherboards, the WCN7850 WiFi card
+reports board_id 0xff because the BIOS lacks proper ACPI BDF tables.
+This results in "failed to get ACPI BDF EXT: 0" during initialization.
+
+Add a fallback mechanism that checks the PCI subsystem ID and provides
+a hardcoded BDF variant when ACPI lookup fails. This allows proper
+board calibration data to be loaded.
+
+Tested on: Gigabyte X870E AORUS MASTER (AI TOP) with WCN7850 hw2.0
+PCI ID: 17cb:1107, Subsystem: 105b:e0fb
+
+Signed-off-by: Zack <zack@local>
+---
+ drivers/net/wireless/ath/ath12k/acpi.c | 28 ++++++++++++++++++++++++++++
+ 1 file changed, 28 insertions(+)
+
+diff --git a/drivers/net/wireless/ath/ath12k/acpi.c b/drivers/net/wireless/ath/ath12k/acpi.c
+index xxxxxx..yyyyyy 100644
+--- a/drivers/net/wireless/ath/ath12k/acpi.c
++++ b/drivers/net/wireless/ath/ath12k/acpi.c
+@@ -8,6 +8,30 @@
+ #include "core.h"
+ #include "acpi.h"
+ #include "debug.h"
++#include <linux/pci.h>
++
++/*
++ * BDF variant fallback table for boards without proper ACPI tables.
++ * Format: { vendor_id, device_id, subsys_vendor, subsys_device, "variant" }
++ */
++static const struct {
++	u16 vendor;
++	u16 device;
++	u16 subsys_vendor;
++	u16 subsys_device;
++	const char *bdf_variant;
++} ath12k_bdf_fallback_table[] = {
++	/* Gigabyte X870E AORUS MASTER with WCN7850 */
++	{ 0x17cb, 0x1107, 0x105b, 0xe0fb, "QC_5mm" },
++	{ 0, 0, 0, 0, NULL }  /* terminator */
++};
++
++static const char *ath12k_acpi_get_bdf_fallback(struct pci_dev *pdev)
++{
++	int i;
++	for (i = 0; ath12k_bdf_fallback_table[i].bdf_variant; i++) {
++		if (pdev->vendor == ath12k_bdf_fallback_table[i].vendor &&
++		    pdev->device == ath12k_bdf_fallback_table[i].device &&
++		    pdev->subsystem_vendor == ath12k_bdf_fallback_table[i].subsys_vendor &&
++		    pdev->subsystem_device == ath12k_bdf_fallback_table[i].subsys_device)
++			return ath12k_bdf_fallback_table[i].bdf_variant;
++	}
++	return NULL;
++}
+
+ static int ath12k_acpi_dsm_get_data(struct ath12k_base *ab, int func)
+ {
+@@ -388,6 +412,7 @@ int ath12k_acpi_start(struct ath12k_base *ab)
+ {
+ 	acpi_status status;
+ 	int ret;
++	const char *fallback_variant;
+
+ 	ab->acpi.acpi_tas_enable = false;
+ 	ab->acpi.acpi_disable_11be = false;
+@@ -418,6 +443,20 @@ int ath12k_acpi_start(struct ath12k_base *ab)
+ 	if (ATH12K_ACPI_FUNC_BIT_VALID(ab->acpi, ATH12K_ACPI_FUNC_BIT_BDF_EXT)) {
+ 		ret = ath12k_acpi_dsm_get_data(ab, ATH12K_ACPI_DSM_FUNC_BDF_EXT);
+ 		if (ret || ab->acpi.bdf_string[0] == '\0') {
++			/* Try fallback for known boards without ACPI BDF tables */
++			if (dev_is_pci(ab->dev)) {
++				struct pci_dev *pdev = to_pci_dev(ab->dev);
++				fallback_variant = ath12k_acpi_get_bdf_fallback(pdev);
++				if (fallback_variant) {
++					snprintf(ab->acpi.bdf_string, sizeof(ab->acpi.bdf_string),
++						 "BDF%s", fallback_variant);
++					ab->acpi.acpi_enable_bdf = true;
++					ath12k_info(ab, "using BDF variant fallback: %s (subsys %04x:%04x)\n",
++						    fallback_variant, pdev->subsystem_vendor,
++						    pdev->subsystem_device);
++					goto bdf_done;
++				}
++			}
+ 			ath12k_warn(ab, "failed to get ACPI BDF EXT: %d\n", ret);
+ 			return ret;
+ 		}
+@@ -425,6 +464,7 @@ int ath12k_acpi_start(struct ath12k_base *ab)
+ 		ab->acpi.acpi_enable_bdf = true;
+ 	}
+
++bdf_done:
+ 	if (ATH12K_ACPI_FUNC_BIT_VALID(ab->acpi, ATH12K_ACPI_FUNC_BIT_TAS_CFG)) {
+ 		ret = ath12k_acpi_dsm_get_data(ab, ATH12K_ACPI_DSM_FUNC_TAS_CFG);
+ 		if (ret) {

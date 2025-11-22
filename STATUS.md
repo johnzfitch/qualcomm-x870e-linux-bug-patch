@@ -1,8 +1,8 @@
 # Current Status
 
-**Last Updated**: 2025-11-21 14:25 PST
-**SSDT Version**: v3 (tested - loads at boot, driver needs patch)
-**WiFi Status**: Operational (board_id 0xff, limited TX power)
+**Last Updated**: 2025-11-21 15:30 PST
+**Fix Method**: board-2.bin firmware override
+**WiFi Status**: Operational - pending reboot test for fix verification
 
 ---
 
@@ -11,14 +11,46 @@
 | Component | Status | Notes |
 |-----------|--------|-------|
 | WiFi Hardware | Working | WCN7850 hw2.0 operational |
-| WiFi Performance | Variable | Works despite board_id 0xff limitation |
-| SSDT v3 | Loads at boot | `Table Upgrade: install [SSDT- GBYTE- WCN7850]` at 0.003s |
-| board_id | 0xff | Generic fallback (driver can't read SSDT) |
-| ACPI BDF EXT | Failing | Driver needs kernel patch to read _DSM |
+| WiFi Performance | ~910 Mbps | Works despite board_id 0xff |
+| Custom board-2.bin | Installed | Added 105b:e0fb entry |
+| Pacman hook | Active | Survives linux-firmware updates |
+| board_id | 0xff | Pending fix verification after reboot |
 
 ---
 
-## SSDT v3 Test Results (2025-11-21)
+## Root Cause Discovered (2025-11-21)
+
+**The subsystem ID `105b:e0fb` is missing from linux-firmware's board-2.bin.**
+
+The driver searches for calibration data by PCI subsystem ID. Since Gigabyte X870E's ID (`105b:e0fb`) doesn't exist in the firmware file, it falls back to `board_id 0xff` (generic).
+
+This explains why:
+- ACPI SSDT approach couldn't help (driver reads board data from firmware, not ACPI)
+- `failed to get ACPI BDF EXT: 0` appears (BIOS lacks tables, but that's not the real problem)
+- WiFi works but with limited TX power
+
+---
+
+## Fix Implemented
+
+### 1. Custom board-2.bin
+Added entry for `105b:e0fb` using calibration data from the similar `e0dc` variant:
+
+```
+bus=pci,vendor=17cb,device=1107,subsystem-vendor=105b,subsystem-device=e0fb,qmi-chip-id=2,qmi-board-id=255,variant=QC_5mm
+```
+
+### 2. Pacman Hook
+Created `/etc/pacman.d/hooks/99-wcn7850-board-fix.hook` to restore custom firmware after linux-firmware updates.
+
+### 3. Restore Script
+Created `/usr/local/bin/wcn7850-board-fix.sh` to copy custom firmware from this repository to system location.
+
+---
+
+## SSDT Approach (Historical)
+
+The ACPI SSDT v3 is still installed but ineffective:
 
 **SSDT loads at early boot:**
 ```
@@ -31,51 +63,25 @@
 [   16.999424] ath12k_pci 0000:0d:00.0: failed to get ACPI BDF EXT: 0
 ```
 
-**Conclusion:** The `acpi_override` hook correctly places SSDT in early CPIO. The ath12k driver's `ath12k_acpi_dsm_get_data()` function doesn't find our _DSM method. **Kernel patch required.**
-
----
-
-## SSDT Version History
-
-| Version | Path Used | Status | Issue |
-|---------|-----------|--------|-------|
-| v1 | `\_SB.PCI0.WCN7` | Failed | Wrong UUID, wrong function, wrong format |
-| v2 | `\_SB.PCI0.WCN7` | Failed | Correct UUID/format, but wrong device path |
-| **v3** | `\_SB.PCI0.GPP7.UP00.DP40.UP00.DP10.WN00` | **Loads, not read** | Driver needs kernel patch |
-
-### Key Discovery (v3)
-The actual ACPI path for the WiFi device was found via:
-```bash
-cat /sys/bus/pci/devices/0000:0d:00.0/firmware_node/path
-# Output: \_SB_.PCI0.GPP7.UP00.DP40.UP00.DP10.WN00
-```
-
-The WiFi card is behind USB4/PCIe bridges, not directly under PCI0.
+**Conclusion:** The ath12k driver's ACPI lookup mechanism doesn't find _DSM methods on the device. The board-2.bin firmware approach is more direct and should work.
 
 ---
 
 ## System Configuration
 
+### Firmware Override
+- **Custom firmware**: `~/dev/qualcomm-x870e-linux-bug-patch/board-2.bin.zst`
+- **System location**: `/usr/lib/firmware/ath12k/WCN7850/hw2.0/board-2.bin.zst`
+- **Pacman hook**: `/etc/pacman.d/hooks/99-wcn7850-board-fix.hook`
+- **Restore script**: `/usr/local/bin/wcn7850-board-fix.sh`
+
 ### Bootloader
 - **Type**: Limine (UKI-based)
 - **UKI Location**: `/boot/EFI/Linux/omarchy_linux.efi`
-- **Config**: `/boot/limine.conf`
-
-### ACPI Override Method
-- **Hook**: `acpi_override` (mkinitcpio hook)
-- **Hook Config**: `/etc/mkinitcpio.conf.d/zz-acpi-override.conf`
-- **SSDT Location**: `/etc/initcpio/acpi_override/SSDT-WCN7850.aml`
-- **Size**: 179 bytes (v3)
-
-The `acpi_override` hook uses `add_file_early` to place SSDTs in the **early uncompressed CPIO**, which is required for kernel ACPI table upgrade at boot.
-
-### Why acpi_override Hook (Not FILES Directive)
-The `FILES=()` directive in mkinitcpio.conf places files in the main compressed image, but ACPI table upgrade requires files in an **uncompressed early CPIO**. The `acpi_override` hook handles this correctly.
 
 ### Network
 - **Ethernet**: Atlantic 10GbE (enp16s0) - 10Gbps link
 - **WiFi**: Qualcomm WCN7850 (wlan1) - Currently active
-- **ISP**: Sonic Fiber
 
 ---
 
@@ -89,78 +95,79 @@ The `FILES=()` directive in mkinitcpio.conf places files in the main compressed 
 ├── CHANGELOG.md                 # Version history
 ├── EMERGENCY-ROLLBACK.md        # Rollback procedures
 │
-├── acpi/
-│   ├── SSDT-WCN7850.aml         # Current compiled SSDT (v3, 179 bytes)
-│   ├── SSDT-WCN7850.dsl         # Original v1 source
-│   ├── SSDT-WCN7850-v2.dsl      # v2 source (correct UUID)
-│   ├── SSDT-WCN7850-v3.dsl      # v3 source (correct path) <- CURRENT
-│   └── SSDT-WCN7850-v1-backup.aml
+├── board-2.bin.zst              # Custom firmware with e0fb entry
+├── board-2-custom.json          # Board data definition
+├── board-2.json                 # Original extracted data
 │
-├── docs/
-│   └── wifi-7-plan.txt          # Original investigation log
+├── acpi/                        # Historical SSDT files
+│   ├── SSDT-WCN7850.aml         # Compiled SSDT (v3)
+│   ├── SSDT-WCN7850-v3.dsl      # v3 source
+│   └── ...
 │
-└── archive/                     # Historical files
-    ├── FINAL-PRE-REBOOT-STATUS.txt
-    ├── FINAL-PRE-REBOOT-STATUS-V2.txt
-    └── SSDT-V2-CHANGES.md
+├── dkms/                        # Alternative kernel patch approach
+│   └── ath12k-wcn7850-fix/
+│       └── 0001-ath12k-add-bdf-variant-fallback.patch
+│
+└── qca-swiss-army-knife/        # Qualcomm firmware tools
 
 System Files:
-├── /etc/initcpio/acpi_override/SSDT-WCN7850.aml  # Installed SSDT
-├── /etc/mkinitcpio.conf.d/zz-acpi-override.conf  # Hook config
-└── /boot/EFI/Linux/omarchy_linux.efi             # UKI with SSDT
+├── /usr/lib/firmware/ath12k/WCN7850/hw2.0/board-2.bin.zst
+├── /etc/pacman.d/hooks/99-wcn7850-board-fix.hook
+├── /usr/local/bin/wcn7850-board-fix.sh
+├── /etc/initcpio/acpi_override/SSDT-WCN7850.aml  # Historical
+└── /etc/mkinitcpio.conf.d/zz-acpi-override.conf  # Historical
 ```
 
 ---
 
 ## Next Steps
 
-### Immediate: Reboot to Test SSDT v3
+### Immediate: Reboot to Test
 ```bash
 sudo reboot
 ```
 
-### After Reboot: Verify
+### After Reboot: Verify Fix
 ```bash
-# Check if SSDT loaded at early boot
-sudo dmesg | grep -i "ACPI.*SSDT\|GBYTE.*WCN7850"
+# Check if board_id changed from 0xff
+sudo dmesg | grep -i "board_id"
 
-# Check ACPI BDF status
-sudo dmesg | grep -i "ACPI BDF\|board_id"
+# Check for our subsystem ID
+sudo dmesg | grep -i "e0fb\|105b"
 
 # Check WiFi interface
 iw dev
 
-# Scan for networks
-sudo iw dev wlan1 scan | grep -E "^BSS|SSID:" | head -20
+# Check TX power
+iw dev wlan1 info | grep txpower
+
+# Speed test
+# Connect to network and test throughput
 ```
 
 ### Expected Outcomes
 
-**If v3 works:**
-- No "failed to get ACPI BDF EXT" message
-- board_id may change from 0xff
-- Can detect neighbor networks
-- TX power increases to 24 dBm
+**If fix works:**
+- board_id changes from 0xff to something else
+- TX power increases (>1 dBm)
+- Possibly better range/stability
 
-**If v3 still fails:**
-- Driver may need kernel patch to read _DSM from the ACPI device
-- Or the device path association isn't happening at boot
+**If fix doesn't work:**
+- board_id still 0xff
+- May need to investigate driver's exact firmware lookup logic
+- Or the calibration data format needs adjustment
 
 ---
 
 ## Rollback
 
-If issues occur after reboot:
+### Restore Original Firmware
 ```bash
-# Remove SSDT from hook directory
-sudo rm /etc/initcpio/acpi_override/SSDT-WCN7850.aml
+# Reinstall linux-firmware to get original board-2.bin
+sudo pacman -S linux-firmware
 
-# Remove hook config (optional)
-sudo rm /etc/mkinitcpio.conf.d/zz-acpi-override.conf
-
-# Rebuild UKI
-sudo mkinitcpio --kernel $(uname -r) --uki /tmp/uki.efi --cmdline /proc/cmdline
-sudo cp /tmp/uki.efi /boot/EFI/Linux/omarchy_linux.efi
+# Remove pacman hook (so it doesn't restore custom firmware)
+sudo rm /etc/pacman.d/hooks/99-wcn7850-board-fix.hook
 
 # Reboot
 sudo reboot
@@ -170,8 +177,9 @@ sudo reboot
 
 ## Technical References
 
-- **ACPI Device Path**: `\_SB.PCI0.GPP7.UP00.DP40.UP00.DP10.WN00`
-- **PCI Location**: `0000:0d:00.0`
-- **WCN7850 UUID**: `f634f534-6147-11ec-90d6-0242ac120003`
+- **PCI ID**: 17cb:1107 (Qualcomm WCN7850)
+- **Subsystem ID**: 105b:e0fb (Gigabyte X870E)
+- **ACPI Path**: `\_SB.PCI0.GPP7.UP00.DP40.UP00.DP10.WN00`
+- **Firmware Location**: `/usr/lib/firmware/ath12k/WCN7850/hw2.0/`
 - **Kernel**: 6.17.8-arch1-1
 - **Driver**: ath12k (in-tree)
